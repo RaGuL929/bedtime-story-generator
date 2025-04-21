@@ -8,11 +8,10 @@ from datetime import datetime
 import torch
 import os
 import logging
+import uvicorn
 
-# Import the modular components
-from backend.story_generator.main import StoryGenerator
-from backend.utils.quality_checker import QualityChecker
-from backend.utils.memory_utils import log_memory_usage, clear_gpu_memory
+from backend import StoryGenerator
+from backend.utils import QualityChecker, log_memory_usage, clear_gpu_memory
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -36,12 +35,12 @@ app.add_middleware(
 
 # Available themes and genres
 AVAILABLE_THEMES = [
-    "animals", "friendship", "family", "space", "ocean", 
+    "animals", "friendship", "family", "space", "ocean",
     "forest", "magic", "seasons", "weather", "toys"
 ]
 
 AVAILABLE_GENRES = [
-    "adventure", "fantasy", "mystery", "educational", 
+    "adventure", "fantasy", "mystery", "educational",
     "funny", "bedtime", "fairy tale", "fable"
 ]
 
@@ -84,11 +83,11 @@ def save_story(story_id, theme, genre, content, title, quality_score):
             (story_id, theme, genre, content, title, quality_score)
         )
         conn.commit()
-        
+
         # Get the created timestamp
         cursor = conn.execute("SELECT created_at FROM stories WHERE id = ?", (story_id,))
         created_at = cursor.fetchone()["created_at"]
-        
+
         return created_at
 
 def get_stories(limit=10):
@@ -99,7 +98,7 @@ def get_stories(limit=10):
             (limit,)
         )
         stories = [dict(row) for row in cursor.fetchall()]
-        
+
         return stories
 
 def get_story(story_id):
@@ -110,7 +109,7 @@ def get_story(story_id):
             (story_id,)
         )
         story = cursor.fetchone()
-        
+
         return dict(story) if story else None
 
 # -------------------- MODELS --------------------
@@ -143,10 +142,10 @@ def get_generator():
     """Get or initialize the story generator."""
     global _generator
     if _generator is None:
-        model_path = os.environ.get("MODEL_PATH", "//Users//abhishek//Desktop//Projects//StoryTime-A-Short-Story-Generator//tinyllama_1500stories_model")
+        model_path = os.environ.get("MODEL_PATH", "/home/para/PycharmProjects/StoryGenerationLLM/models/tinyllama_1500stories_model")
         logger.info(f"Initializing StoryGenerator with model path: {model_path}")
         _generator = StoryGenerator(model_path)
-        
+
         # Log memory usage after initialization
         log_memory_usage()
     return _generator
@@ -175,10 +174,10 @@ async def generate_story(request: StoryRequest, generator=Depends(get_generator)
     # Validate theme and genre
     if request.theme not in AVAILABLE_THEMES:
         raise HTTPException(status_code=400, detail=f"Theme must be one of: {', '.join(AVAILABLE_THEMES)}")
-    
+
     if request.genre not in AVAILABLE_GENRES:
         raise HTTPException(status_code=400, detail=f"Genre must be one of: {', '.join(AVAILABLE_GENRES)}")
-    
+
     try:
         # Generate story using our modular generator
         story_content = generator.generate_story(
@@ -187,26 +186,26 @@ async def generate_story(request: StoryRequest, generator=Depends(get_generator)
             max_length=request.max_length,
             temperature=request.temperature
         )
-        
+
         # Generate title
         title = generator.generate_title(story_content)
-        
+
         # Check story quality
         quality = generator.evaluate_quality(story_content)
-        
+
         # Create unique ID for the story
         story_id = str(uuid.uuid4())
-        
+
         # Save to database
         created_at = save_story(
-            story_id, 
-            request.theme, 
-            request.genre, 
-            story_content, 
-            title, 
+            story_id,
+            request.theme,
+            request.genre,
+            story_content,
+            title,
             quality["score"]
         )
-        
+
         # Return the response
         return {
             "id": story_id,
@@ -217,7 +216,7 @@ async def generate_story(request: StoryRequest, generator=Depends(get_generator)
             "quality": quality,
             "created_at": created_at
         }
-        
+
     except Exception as e:
         logger.error(f"Error generating story: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error generating story: {str(e)}")
@@ -252,10 +251,10 @@ async def get_memory_stats():
     try:
         # Import memory utils to get stats
         from backend.utils.memory_utils import get_memory_usage
-        
+
         # Get memory stats
         memory_stats = get_memory_usage()
-        
+
         return {
             "memory_stats": memory_stats,
             "timestamp": datetime.now().isoformat()
@@ -270,7 +269,7 @@ async def clear_memory():
     try:
         # Clear GPU memory
         clear_gpu_memory()
-        
+
         return {
             "status": "success",
             "message": "Memory cleared successfully",
@@ -279,3 +278,6 @@ async def clear_memory():
     except Exception as e:
         logger.error(f"Error clearing memory: {str(e)}")
         raise HTTPException(status_code=500, detail=f"Error clearing memory: {str(e)}")
+
+if __name__ == '__main__':
+    uvicorn.run(app, host="0.0.0.0", port=8000)
